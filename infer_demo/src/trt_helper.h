@@ -16,41 +16,10 @@
 #ifndef CUDA_CHECK
 #  define CUDA_CHECK(status)                                                      \
     if (status != cudaSuccess) {                                                  \
-      std::cout << "Cuda failure! Error=" << cudaGetErrorString(status) << std::endl; \
+      std::cout << "Cuda failure! Error=" << cudaGetErrorString(status)           \
+                << " at " << __FILE__ << " " << __LINE__ << std::endl;            \
     }
 #endif
-
-template <typename T>
-using cuda_shared_ptr = std::shared_ptr<T>;
-
-struct InferDeleter {
-  template <typename T>
-  void operator()(T *obj) const {
-    if (obj) {
-      obj->destroy();
-    }
-  }
-};
-
-template <typename T>
-std::shared_ptr<T> makeShared(T *obj) {
-  if (!obj) {
-    throw std::runtime_error("Failed to create object");
-  }
-  return std::shared_ptr<T>(obj, InferDeleter());
-}
-
-template <typename T>
-struct CudaDeleter {
-  void operator()(T* buf) {
-    if (buf) cudaFree(buf);
-  }
-};
-
-template <typename T>
-void make_cuda_shared(cuda_shared_ptr<T>& ptr, void* cudaMem) {
-  ptr.reset(static_cast<T*>(cudaMem), CudaDeleter<T>());
-}
 
 struct TrtDestroyer {
   template <typename T>
@@ -145,11 +114,12 @@ class TrtHepler {
   cudaStream_t cuda_stream_;
 
   // The all dims of all inputs.
-  std::vector<nvinfer1::Dims> inputs_dims_;
-  std::vector<void*> device_bindings_;
+  // std::vector<nvinfer1::Dims> inputs_dims_;
+  // std::vector<void*> device_bindings_;
+  char *h_buffer_;
+  char *d_buffer_;
 };
 
 // } // BEGIN_LIB_NAMESPACE
 
 #endif // TRT_HEPLER_
-

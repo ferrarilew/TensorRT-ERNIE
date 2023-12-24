@@ -10,49 +10,6 @@ using namespace std;
 
 // BEGIN_LIB_NAMESPACE {
 
-cuda_shared_ptr<void> CpuToDevice(const std::vector<int>& shape, int* data_ptr) {
-  void *d_ptr;
-  auto cpu_ptr = static_cast<void *>(data_ptr);
-  int data_size = 1;
-  for (int i = 0; i < shape.size(); i++) data_size *= shape[i];
-  auto ret = cudaMalloc(&d_ptr, data_size * sizeof(int));
-  //printf("int memory\n");
-  if (ret) printf("memory error\n");
-  ret = cudaMemcpy(d_ptr, cpu_ptr, data_size * sizeof(int), cudaMemcpyHostToDevice);
-  if (ret) printf("memory error\n");
-  cuda_shared_ptr<void> cuda_ptr;
-  make_cuda_shared(cuda_ptr, d_ptr);
-  return cuda_ptr;
-}
-
-cuda_shared_ptr<void> CpuToDevice(const std::vector<int>& shape, float* data_ptr) {
-  void *d_ptr;
-  auto cpu_ptr = static_cast<void *>(data_ptr);
-  int data_size = 1;
-  for (int i = 0; i < shape.size(); i++) data_size *= shape[i];
-  auto ret = cudaMalloc(&d_ptr, data_size * sizeof(float));
-  //printf("float memory\n");
-  if (ret) printf("memory error\n");
-  ret = cudaMemcpy(d_ptr, cpu_ptr, data_size * sizeof(float), cudaMemcpyHostToDevice);
-  if (ret) printf("memory error\n");
-  cuda_shared_ptr<void> cuda_ptr;
-  make_cuda_shared(cuda_ptr, d_ptr);
-  return cuda_ptr;
-}
-
-void DeviceToCpu(const std::vector<int>& shape, cuda_shared_ptr<void> cuda_ptr, float* data_ptr) {
-  int data_size = 1;
-  for (int i = 0; i < shape.size(); i++) data_size *= shape[i];
-  if (data_size == 0) {
-    std::cout << "data_size == 0" << std::endl;
-    assert(0);
-  }
-  auto d_ptr = static_cast<void *>(data_ptr);
-  auto ret = cudaMemcpy(d_ptr, cuda_ptr.get(), data_size * sizeof(float), cudaMemcpyDeviceToHost);
-  printf("copy back\n");
-  if (ret) printf("memory error\n");
-}
-
 TrtLogger::TrtLogger(nvinfer1::ILogger::Severity level) : level_(level) {}
 
 nvinfer1::ILogger& TrtLogger::getTRTLogger() { return *this; }
@@ -101,37 +58,98 @@ TrtHepler::TrtHepler(std::string model_param, int dev_id)
     engine_ = MakeShared(e);
     context_ = MakeShared(engine_->createExecutionContext());
     context_->setOptimizationProfile(0);
+
+    int max_input_size = 3 * 10 * 128 * sizeof(int) +
+                         1 * 10 * 128 * sizeof(float) +
+                         8 * 10 * 1 * sizeof(int);
+    int max_output_size = 1 * 10 * 1 * sizeof(float);
+    CUDA_CHECK(cudaMalloc(&d_buffer_, max_input_size + max_output_size));
+    CUDA_CHECK(cudaMallocHost(&h_buffer_, max_input_size + max_output_size));
   }
 
 }
 
 int TrtHepler::Forward(sample& s) {
   cudaSetDevice(_dev_id);
-  auto rc_ids_tensor = CpuToDevice(s.shape_info_0, s.i0.data());
-  auto sent_ids_tensor = CpuToDevice(s.shape_info_1, s.i1.data());
-  auto pos_ids_tensor = CpuToDevice(s.shape_info_2, s.i2.data());
-  auto input_mask_tensor = CpuToDevice(s.shape_info_3, s.i3.data());
-  auto tmp6_tensor = CpuToDevice(s.shape_info_4, s.i4.data());
-  auto tmp7_tensor = CpuToDevice(s.shape_info_5, s.i5.data());
-  auto tmp8_tensor = CpuToDevice(s.shape_info_6, s.i6.data());
-  auto tmp9_tensor = CpuToDevice(s.shape_info_7, s.i7.data());
-  auto tmp10_tensor = CpuToDevice(s.shape_info_8, s.i8.data());
-  auto tmp11_tensor = CpuToDevice(s.shape_info_9, s.i9.data());
-  auto tmp12_tensor = CpuToDevice(s.shape_info_10, s.i10.data());
-  auto tmp13_tensor = CpuToDevice(s.shape_info_11, s.i11.data());
 
-  void* out_ptr;
-  auto ret_ = cudaMalloc(&out_ptr, s.shape_info_0[0] * sizeof(float));  // -1 * 1
-  cuda_shared_ptr<void> cuda_out_ptr;
-  make_cuda_shared(cuda_out_ptr, out_ptr);
+  int first_data_size = 1;
+  for (int i = 0; i < s.shape_info_0.size(); i++) {
+    first_data_size *= s.shape_info_0[i];
+  }
+  int second_data_size = first_data_size * sizeof(float);
+  first_data_size *= sizeof(int);
+  int third_data_size = 1;
+  for (int i = 0; i < s.shape_info_4.size(); i++) {
+    third_data_size *= s.shape_info_4[i];
+  }
+  int fourth_data_size = third_data_size * sizeof(float);
+  third_data_size *= sizeof(int);
+  int whole_input_size = 3 * first_data_size +
+                         1 * second_data_size +
+                         8 * third_data_size;
+  int whole_output_size = 1 * fourth_data_size;
+  // char *h_buffer_;
+  // char *d_buffer_;
+  // CUDA_CHECK(cudaMalloc(&d_buffer_, whole_input_size + whole_output_size));
+  // CUDA_CHECK(cudaMallocHost(&h_buffer_, whole_input_size + whole_output_size));
 
-  cudaEvent_t start, stop;
-  float elapsed_time = 0.0;
+  void *host_bindings_[13];
+  void *device_bindings_[13];
+
+  int b_i = 0;
+  auto h_buffer_ptr = h_buffer_;
+  auto d_buffer_ptr = d_buffer_;
+  // 0 - 2
+  while (b_i < 3) {
+    host_bindings_[b_i] = h_buffer_ptr;
+    h_buffer_ptr += first_data_size;
+    device_bindings_[b_i] = d_buffer_ptr;
+    d_buffer_ptr += first_data_size;
+    b_i++;
+  }
+  // 3
+  host_bindings_[b_i] = h_buffer_ptr;
+  h_buffer_ptr += second_data_size;
+  device_bindings_[b_i]= d_buffer_ptr;
+  d_buffer_ptr += second_data_size;
+  b_i++;
+  // 4 - 11
+  while (b_i < 12) {
+    host_bindings_[b_i] = h_buffer_ptr;
+    h_buffer_ptr += third_data_size;
+    device_bindings_[b_i] = d_buffer_ptr;
+    d_buffer_ptr += third_data_size;
+    b_i++;
+  }
+  // 13 - output
+  host_bindings_[b_i] = h_buffer_ptr;
+  // h_buffer_ptr += fourth_data_size;
+  device_bindings_[b_i]= d_buffer_ptr;
+  // d_buffer_ptr += fourth_data_size;
+  // b_i++;
+
+  // memcpy
+  memcpy(host_bindings_[0], s.i0.data(), first_data_size);
+  memcpy(host_bindings_[1], s.i1.data(), first_data_size);
+  memcpy(host_bindings_[2], s.i2.data(), first_data_size);
+  memcpy(host_bindings_[3], s.i3.data(), second_data_size);
+
+  memcpy(host_bindings_[4], s.i4.data(), third_data_size);
+  memcpy(host_bindings_[5], s.i5.data(), third_data_size);
+  memcpy(host_bindings_[6], s.i6.data(), third_data_size);
+  memcpy(host_bindings_[7], s.i7.data(), third_data_size);
+  memcpy(host_bindings_[8], s.i8.data(), third_data_size);
+  memcpy(host_bindings_[9], s.i9.data(), third_data_size);
+  memcpy(host_bindings_[10], s.i10.data(), third_data_size);
+  memcpy(host_bindings_[11], s.i11.data(), third_data_size);
+
+  CUDA_CHECK(cudaMemcpy(d_buffer_, h_buffer_, whole_input_size,
+                        cudaMemcpyHostToDevice));
+
+  // cudaEvent_t start, stop;
+  // float elapsed_time = 0.0;
 
   int binding_idx = 0;
-  //std::vector<std::vector<int>> input_dims = {s.shape_info_0, s.shape_info_1, s.shape_info_2, s.shape_info_3,
-                                              //s.shape_info_4, s.shape_info_5, s.shape_info_6, s.shape_info_7,
-                                              //s.shape_info_8, s.shape_info_9, s.shape_info_10, s.shape_info_11};
   std::vector<std::vector<int>> input_dims = {s.shape_info_0, s.shape_info_1, s.shape_info_2, s.shape_info_3,
                                               s.shape_info_4, s.shape_info_5, s.shape_info_6, s.shape_info_7,
                                               s.shape_info_8, s.shape_info_9, s.shape_info_10, s.shape_info_11};
@@ -142,7 +160,7 @@ int TrtHepler::Forward(sample& s) {
     trt_dims.nbDims = static_cast<int>(dims_vec.size());
     memcpy(trt_dims.d, dims_vec.data(), sizeof(int) * trt_dims.nbDims);
     context_->setBindingDimensions(binding_idx, trt_dims);
-    binding_idx ++;
+    binding_idx++;
   }
 
   if (!context_->allInputDimensionsSpecified()) {
@@ -151,32 +169,24 @@ int TrtHepler::Forward(sample& s) {
     assert(0);
   }
 
-  // set the input dim
-
-  void *device_bindings[13] = {rc_ids_tensor.get(), sent_ids_tensor.get(), pos_ids_tensor.get(),
-                               input_mask_tensor.get(),
-                               tmp6_tensor.get(), tmp7_tensor.get(),
-                               tmp8_tensor.get(), tmp9_tensor.get(), tmp10_tensor.get(),
-                               tmp11_tensor.get(), tmp12_tensor.get(), tmp13_tensor.get(),
-                               cuda_out_ptr.get()};
-  //printf("before enqueue\n");
-  bool ret = context_->enqueueV2(device_bindings, cuda_stream_, nullptr);
+  bool ret = context_->enqueueV2(device_bindings_, cuda_stream_, nullptr);
   if (!ret) {
     std::cout << ("context_->enqueueV2 failed!") << std::endl;
     return -100;
   }
 
-  cudaMemcpy(s.out_data.data(), cuda_out_ptr.get(), s.shape_info_0[0] * sizeof(float), cudaMemcpyDeviceToHost);
+  CUDA_CHECK(cudaMemcpy(s.out_data.data(), device_bindings_[12], fourth_data_size, cudaMemcpyDeviceToHost));
   cudaStreamSynchronize(cuda_stream_);
   struct timeval tv;
   gettimeofday(&tv, NULL);
   s.timestamp = tv.tv_sec * 1000000 + tv.tv_usec;
 
+  return 0;
 }
 
 TrtHepler::~TrtHepler() {
   CUDA_CHECK(cudaStreamDestroy(cuda_stream_));
+  CUDA_CHECK(cudaFree(d_buffer_));
 }
 
 // } // BEGIN_LIB_NAMESPACE
-
