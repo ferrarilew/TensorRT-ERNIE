@@ -16,7 +16,7 @@ def onnx2trt(args):
 
     builder = trt.Builder(logger)
     config = builder.create_builder_config()
-    profile = builder.create_optimization_profile()
+    # profile = builder.create_optimization_profile()
     network = builder.create_network(1<<int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
     config.max_workspace_size = 3<<30
 
@@ -51,6 +51,7 @@ def onnx2trt(args):
     tmp12_tensor = network.get_input(10)
     tmp13_tensor = network.get_input(11)
 
+    """
     profile = builder.create_optimization_profile()
     min_shape = (1, 128, 1)
     opt_shape = (5, 128, 1)
@@ -72,6 +73,29 @@ def onnx2trt(args):
     profile.set_shape(tmp12_tensor.name, min=min_shape, opt=opt_shape, max=max_shape)
     profile.set_shape(tmp13_tensor.name, min=min_shape, opt=opt_shape, max=max_shape)
     config.add_optimization_profile(profile)
+    """
+    batches = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    seq_lens = [1, 32, 64, 96, 128]
+
+    for b in batches:
+        for s in seq_lens:
+            profile = builder.create_optimization_profile()
+            static_shape = (b, s, 1)
+            profile.set_shape(src_ids_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(pos_ids_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(sent_ids_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(input_mask_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+
+            static_shape = (b, 1, 1)
+            profile.set_shape(tmp6_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(tmp7_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(tmp8_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(tmp9_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(tmp10_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(tmp11_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(tmp12_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            profile.set_shape(tmp13_tensor.name, min=static_shape, opt=static_shape, max=static_shape)
+            config.add_optimization_profile(profile)
 
     engine = builder.build_engine(network, config)
     if not engine:

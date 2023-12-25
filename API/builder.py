@@ -365,6 +365,7 @@ def build_engine(args, config, weights_dict, calibrationCacheFile):
 
         network_helper.markOutput(out)
 
+        """
         profile = builder.create_optimization_profile()
         min_shape = (1, 128, 1)
         opt_shape = (5, 128, 1)
@@ -386,6 +387,29 @@ def build_engine(args, config, weights_dict, calibrationCacheFile):
         profile.set_shape("tmp12", min=min_shape, opt=opt_shape, max=max_shape)
         profile.set_shape("tmp13", min=min_shape, opt=opt_shape, max=max_shape)
         builder_config.add_optimization_profile(profile)
+        """
+        batches = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        seq_lens = [1, 32, 64, 96, 128]
+
+        for b in batches:
+            for s in seq_lens:
+                profile = builder.create_optimization_profile()
+                static_shape = (b, s, 1)
+                profile.set_shape("src_ids", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("sent_ids", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("pos_ids", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("input_mask", min=static_shape, opt=static_shape, max=static_shape)
+
+                static_shape = (b, 1, 1)
+                profile.set_shape("tmp6", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("tmp7", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("tmp8", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("tmp9", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("tmp10", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("tmp11", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("tmp12", min=static_shape, opt=static_shape, max=static_shape)
+                profile.set_shape("tmp13", min=static_shape, opt=static_shape, max=static_shape)
+                builder_config.add_optimization_profile(profile)
 
         build_start_time = time.time()
         engine = builder.build_engine(network, builder_config)

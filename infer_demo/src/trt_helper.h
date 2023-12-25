@@ -72,12 +72,6 @@ struct sample{
     uint64_t timestamp;
 };
 
-
-// BEGIN_LIB_NAMESPACE {
-
-// Undef levels to support LOG(LEVEL)
-
-
 /**
  * \brief Trt TrtLogger 日志类，全局对象
  */
@@ -97,29 +91,51 @@ class TrtLogger : public nvinfer1::ILogger {
   Severity level_;
 };
 
-class TrtHepler {
+class TrtEngine {
  public:
-  TrtHepler(std::string model_param, int dev_id);
+  TrtEngine(std::string model_param, int dev_id);
+
+  ~TrtEngine() {};
+
+  int dev_id_;
+
+  std::shared_ptr<nvinfer1::ICudaEngine> engine_;
+
+  TrtLogger trt_logger;
+};
+
+class TrtContext {
+ public:
+  TrtContext(TrtEngine* engine, int profile_idx);
 
   int Forward(sample& s);
 
-  ~TrtHepler();
+  ~TrtContext();
 
  private:
-  int _dev_id;
+  int dev_id_;
   // NS_PROTO::ModelParam *_model_param_ptr;
-  std::string _model_param;
   std::shared_ptr<nvinfer1::ICudaEngine> engine_;
   std::shared_ptr<nvinfer1::IExecutionContext> context_;
   cudaStream_t cuda_stream_;
 
-  // The all dims of all inputs.
-  // std::vector<nvinfer1::Dims> inputs_dims_;
-  // std::vector<void*> device_bindings_;
+  std::vector<void*> device_bindings_;
+  std::vector<void*> host_bindings_;
+
   char *h_buffer_;
   char *d_buffer_;
-};
 
-// } // BEGIN_LIB_NAMESPACE
+  int profile_idx_;
+
+  int max_batch_;
+  int max_seq_len_;
+  int start_binding_idx_;
+
+  int align_input_type1_bytes_;
+  int align_input_type2_bytes_;
+  int align_aside_input_type3_bytes_;
+  int align_output_bytes_;
+  int whole_bytes_;
+};
 
 #endif // TRT_HEPLER_

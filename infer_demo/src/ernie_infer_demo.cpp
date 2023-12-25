@@ -20,37 +20,6 @@
 
 static const int MAX_SEQ = 128;
 
-// struct sample{
-//     std::string qid;
-//     std::string label;
-//     std::vector<int> shape_info_0;
-//     std::vector<int64_t> i0;
-//     std::vector<int> shape_info_1;
-//     std::vector<int64_t> i1;
-//     std::vector<int> shape_info_2;
-//     std::vector<int64_t> i2;
-//     std::vector<int> shape_info_3;
-//     std::vector<float> i3;
-//     std::vector<int> shape_info_4;
-//     std::vector<int64_t> i4;
-//     std::vector<int> shape_info_5;
-//     std::vector<int64_t> i5;
-//     std::vector<int> shape_info_6;
-//     std::vector<int64_t> i6;
-//     std::vector<int> shape_info_7;
-//     std::vector<int64_t> i7;
-//     std::vector<int> shape_info_8;
-//     std::vector<int64_t> i8;
-//     std::vector<int> shape_info_9;
-//     std::vector<int64_t> i9;
-//     std::vector<int> shape_info_10;
-//     std::vector<int64_t> i10;
-//     std::vector<int> shape_info_11;
-//     std::vector<int64_t> i11;
-//     std::vector<float> out_data;
-//     uint64_t timestamp;
-// };
-
 void split_string(const std::string& str,
                   const std::string& delimiter,
                   std::vector<std::string>& fields) {
@@ -85,13 +54,14 @@ void field2vec(const std::string& input_str,
     }
     int batch_size = shape_info->at(0);
     int seq_len = shape_info->at(1);
+    int padding_seq_len = (seq_len + 31) / 32 * 32;
     if (i64_vec) {
         for (int i = 0; i < batch_size; ++i) {
             for (int j = 0; j < seq_len; ++j) {
                 i64_vec->push_back(std::stoll(i_v[i * seq_len + j]));
             }
-            // padding to MAX_SEQ_LEN
-            for (int j = 0; padding && j < MAX_SEQ - seq_len; ++j) {
+            // padding to padding_seq_len
+            for (int j = 0; padding && j < padding_seq_len - seq_len; ++j) {
                 i64_vec->push_back(0);
             }
         }
@@ -100,15 +70,15 @@ void field2vec(const std::string& input_str,
             for (int j = 0; j < seq_len; ++j) {
                 f_vec->push_back(std::stof(i_v[i * seq_len + j]));
             }
-            // padding to MAX_SEQ_LEN
-            for (int j = 0; padding && j < MAX_SEQ - seq_len; ++ j) {
+            // padding to padding_seq_len
+            for (int j = 0; padding && j < padding_seq_len - seq_len; ++j) {
                 f_vec->push_back(0);
             }
         }
     }
-    if (padding) {
-        (*shape_info)[1] = MAX_SEQ;
-    }
+    // if (padding) {
+    //     (*shape_info)[1] = padding_seq_len;
+    // }
 }
 
 void line2sample(const std::string& line, sample* sout) {
@@ -145,7 +115,19 @@ int main(int argc, char *argv[]) {
   // init
   std::string model_para_file = argv[1];
   std::cout << model_para_file << std::endl;
-  auto trt_helper = new TrtHepler(model_para_file, 0);
+  TrtEngine trt_engine(model_para_file, 0);
+
+  std::vector<int> batches{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  std::vector<int> seq_lens{1, 32, 64, 96, 128};
+  auto context_num = batches.size() * seq_lens.size();
+
+  assert(trt_engine.engine_->getNbOptimizationProfiles() == context_num);
+
+  std::vector<std::shared_ptr<TrtContext>> trt_contexts(context_num);
+  for (size_t i= 0; i < context_num; i++) {
+    trt_contexts[i] = std::make_shared<TrtContext>(&trt_engine, i);
+  }
+
   // preprocess
   std::string aline;
   std::ifstream ifs;
@@ -161,8 +143,21 @@ int main(int argc, char *argv[]) {
 
   // inference
   for (auto& s : sample_vec) {
-      // //run(predictor.get(), s);
-      trt_helper->Forward(s);
+    int batch = s.shape_info_0[0];
+    int seq_len = s.shape_info_0[1];
+
+    int s_idx = 0;
+    for (int i = 0; i < seq_lens.size(); i++) {
+      if (seq_len <= seq_lens[i]) {
+        s_idx=i;
+        break;
+      }
+    }
+
+    auto batch_idx = batches[batch - 1] - 1;
+    int context_idx = batch_idx * seq_lens.size() + s_idx;
+
+    trt_contexts[context_idx]->Forward(s);
   }
 
   // postprocess
