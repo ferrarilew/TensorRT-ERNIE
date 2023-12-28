@@ -119,7 +119,8 @@ class TrtContext {
   std::shared_ptr<nvinfer1::IExecutionContext> context_;
   cudaStream_t cuda_stream_;
 
-  std::vector<void*> device_bindings_;
+  static std::vector<void*> global_device_bindings_;
+  // std::vector<void*> device_bindings_;
   std::vector<void*> host_bindings_;
 
   char *h_buffer_;

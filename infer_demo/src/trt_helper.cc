@@ -62,6 +62,8 @@ constexpr int AlignTo(int a, int b = kAlignment) {
   return (a + b - 1) / b * b;
 }
 
+std::vector<void*> TrtContext::global_device_bindings_;
+
 TrtContext::TrtContext(TrtEngine *trt_engine, int profile_idx) {
   profile_idx_ = profile_idx;
   engine_ = trt_engine->engine_;
@@ -96,36 +98,38 @@ TrtContext::TrtContext(TrtEngine *trt_engine, int profile_idx) {
   auto h_buffer_ptr = h_buffer_;
   auto d_buffer_ptr = d_buffer_;
 
-  device_bindings_.resize(engine_->getNbBindings());
-  for (size_t i= 0; i < device_bindings_.size(); i++) {
-    device_bindings_[i] = d_buffer_ptr;
+  if (global_device_bindings_.empty()) {
+    global_device_bindings_.resize(engine_->getNbBindings());
   }
+  // for (size_t i= 0; i < global_device_bindings_.size(); i++) {
+  //   global_device_bindings_[i] = d_buffer_ptr;
+  // }
 
   int b_i = 0;
   // 0 - 2
   while (b_i < 3) {
-    device_bindings_[start_binding_idx_ + b_i]= d_buffer_ptr;
+    global_device_bindings_[start_binding_idx_ + b_i]= d_buffer_ptr;
     host_bindings_.push_back(h_buffer_ptr);
     h_buffer_ptr += align_input_type1_bytes_;
     d_buffer_ptr += align_input_type1_bytes_;
     b_i++;
   }
   // 3
-  device_bindings_[start_binding_idx_ + b_i]= d_buffer_ptr;
+  global_device_bindings_[start_binding_idx_ + b_i]= d_buffer_ptr;
   host_bindings_.push_back(h_buffer_ptr);
   h_buffer_ptr += align_input_type2_bytes_;
   d_buffer_ptr += align_input_type2_bytes_;
   b_i++;
   // 4 - 11
   while (b_i < 12) {
-    device_bindings_[start_binding_idx_ + b_i] = d_buffer_ptr;
+    global_device_bindings_[start_binding_idx_ + b_i] = d_buffer_ptr;
     host_bindings_.push_back(h_buffer_ptr);
     h_buffer_ptr += align_aside_input_type3_bytes_;
     d_buffer_ptr += align_aside_input_type3_bytes_;
     b_i++;
   }
   // 12
-  device_bindings_[start_binding_idx_ + b_i] = d_buffer_ptr;
+  global_device_bindings_[start_binding_idx_ + b_i] = d_buffer_ptr;
   host_bindings_.push_back(h_buffer_ptr);
 
   std::vector<int> input_dim = {max_batch_, max_seq_len_, 1};
@@ -188,14 +192,14 @@ int TrtContext::Forward(sample& s) {
                         cudaMemcpyHostToDevice, cuda_stream_));
   cudaStreamSynchronize(cuda_stream_);
 
-  bool ret = context_->enqueueV2((void**)device_bindings_.data(), cuda_stream_, nullptr);
+  bool ret = context_->enqueueV2((void**)global_device_bindings_.data(), cuda_stream_, nullptr);
   if (!ret) {
     std::cout << "context_->enqueueV2 failed!" << std::endl;
     return -100;
   }
 
   // s.out_data.resize(batch);
-  CUDA_CHECK(cudaMemcpyAsync(s.out_data.data(), device_bindings_[start_binding_idx_ + 12], aside_output_bytes,
+  CUDA_CHECK(cudaMemcpyAsync(s.out_data.data(), global_device_bindings_[start_binding_idx_ + 12], aside_output_bytes,
                              cudaMemcpyDeviceToHost, cuda_stream_));
   cudaStreamSynchronize(cuda_stream_);
 
