@@ -108,6 +108,8 @@ class TrtContext {
  public:
   TrtContext(TrtEngine* engine, int profile_idx);
 
+  int CaptureCudaGraph();
+
   int Forward(sample& s);
 
   ~TrtContext();
@@ -137,6 +139,10 @@ class TrtContext {
   int align_aside_input_type3_bytes_;
   int align_output_bytes_;
   int whole_bytes_;
+
+  cudaGraph_t graph_;
+  cudaGraphExec_t instance_;
+  bool graph_created_ = false;
 };
 
 #endif // TRT_HEPLER_

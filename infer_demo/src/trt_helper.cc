@@ -163,6 +163,62 @@ TrtContext::TrtContext(TrtEngine *trt_engine, int profile_idx) {
   cudaStreamSynchronize(cuda_stream_);
 }
 
+// template<class T>
+// void _fill(T* ptr, int size, T v) {
+//   for (int i = 0; i < size; i++) ptr[i]= v;
+// }
+
+int TrtContext::CaptureCudaGraph() {
+  if (graph_created_) return 1;
+
+  // // fill test inputs
+  // auto input_size = max_batch_ * max_seq_len_;
+  // _fill((int*)host_bindings_[0], input_size, 1);
+  // _fill((int*)host_bindings_[1], input_size, 1);
+  // _fill((int*)host_bindings_[2], input_size, 1);
+  // _fill((float*)host_bindings_[3], input_size, 1.0f);
+
+  // _fill((int*)host_bindings_[4], max_batch_, 1);
+  // _fill((int*)host_bindings_[5], max_batch_, 1);
+  // _fill((int*)host_bindings_[6], max_batch_, 1);
+  // _fill((int*)host_bindings_[7], max_batch_, 1);
+  // _fill((int*)host_bindings_[8], max_batch_, 1);
+  // _fill((int*)host_bindings_[9], max_batch_, 1);
+  // _fill((int*)host_bindings_[10], max_batch_, 1);
+  // _fill((int*)host_bindings_[11], max_batch_, 1);
+
+  // warm up and let mContext do cublas initialization
+  auto status = context_->enqueueV2((void**)global_device_bindings_.data(), cuda_stream_, nullptr);
+  if (!status) {
+    cerr <<"Enqueue failed\n";
+    exit(-1);
+  }
+
+  CUDA_CHECK(cudaStreamBeginCapture(cuda_stream_, cudaStreamCaptureModeRelaxed));
+
+  CUDA_CHECK(cudaMemcpyAsync(d_buffer_, h_buffer_, whole_bytes_ - align_output_bytes_,
+                             cudaMemcpyHostToDevice, cuda_stream_));
+
+  status = context_->enqueueV2((void**)global_device_bindings_.data(), cuda_stream_, nullptr);
+  if (!status) {
+    std::cerr << "Enqueue failed\n";
+    exit(-1);
+  }
+
+  CUDA_CHECK(cudaStreamEndCapture(cuda_stream_, &graph_));
+  CUDA_CHECK(cudaStreamSynchronize(cuda_stream_));
+  CUDA_CHECK(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
+
+  // CUDA_CHECK(cudaMemcpyAsync(host_bindings_[12], device_bindings_[12], align_aside_input_bytes_,
+  //                            cudaMemcpyDeviceToHost, cuda_stream_));
+
+  graph_created_ = true;
+
+  std::cout << "profile_idx=" << profile_idx_ << ", CaptureCudaGraph Done!" << endl;
+
+  return 0;
+}
+
 int TrtContext::Forward(sample& s) {
   cudaSetDevice(dev_id_);
 
@@ -188,14 +244,22 @@ int TrtContext::Forward(sample& s) {
   memcpy(host_bindings_[10], s.i10.data(), aside_input_type3_bytes);
   memcpy(host_bindings_[11], s.i11.data(), aside_input_type3_bytes);
 
-  CUDA_CHECK(cudaMemcpyAsync(d_buffer_, h_buffer_, whole_bytes_ - align_output_bytes_,
-                        cudaMemcpyHostToDevice, cuda_stream_));
-  cudaStreamSynchronize(cuda_stream_);
+  if (graph_created_) {
+    // CUDA_CHECK(cudaMemcpyAsync(d_buffer_, h_buffer_, whole_bytes_ - align_output_bytes_,
+    //                       cudaMemcpyHostToDevice, cuda_stream_));
+    // cudaStreamSynchronize(cuda_stream_);
 
-  bool ret = context_->enqueueV2((void**)global_device_bindings_.data(), cuda_stream_, nullptr);
-  if (!ret) {
-    std::cout << "context_->enqueueV2 failed!" << std::endl;
-    return -100;
+    CUDA_CHECK(cudaGraphLaunch(instance_, cuda_stream_));
+  } else {
+    CUDA_CHECK(cudaMemcpyAsync(d_buffer_, h_buffer_, whole_bytes_ - align_output_bytes_,
+                          cudaMemcpyHostToDevice, cuda_stream_));
+    cudaStreamSynchronize(cuda_stream_);
+
+    bool ret = context_->enqueueV2((void**)global_device_bindings_.data(), cuda_stream_, nullptr);
+    if (!ret) {
+      std::cout << "context_->enqueueV2 failed!" << std::endl;
+      return -100;
+    }
   }
 
   // s.out_data.resize(batch);

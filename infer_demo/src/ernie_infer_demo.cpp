@@ -124,8 +124,12 @@ int main(int argc, char *argv[]) {
   assert(trt_engine.engine_->getNbOptimizationProfiles() == context_num);
 
   std::vector<std::shared_ptr<TrtContext>> trt_contexts(context_num);
-  for (size_t i= 0; i < context_num; i++) {
+  for (size_t i = 0; i < context_num; i++) {
     trt_contexts[i] = std::make_shared<TrtContext>(&trt_engine, i);
+  }
+
+  for (size_t i = 0; i < context_num; i++) {
+    trt_contexts[i]->CaptureCudaGraph();
   }
 
   // preprocess
